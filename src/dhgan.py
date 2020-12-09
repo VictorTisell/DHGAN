@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import datetime
 import QuantLib as ql
+import matplotlib.pyplot as plt
 from tensorflow.keras.layers import TimeDistributed
 class DHGAN(Loader, Option_data):
     def __init__(self, symbol_list, settings, dh_settings, option_data, option_settings):
@@ -37,7 +38,7 @@ class DHGAN(Loader, Option_data):
         self.norm_strike = (np.log(self.K) - self.min_val[0])/(self.max_val[0] + 1e-7)
         self.T = self.seq_len
         self.W_dim = self.dim
-        # model calls
+        # models
         self.Embedder = self.EmbedderNet()
         self.Embedder.summary()
         self.Embedder_optimizer = tf.keras.optimizers.Adam(self.learning_rate)
@@ -59,17 +60,6 @@ class DHGAN(Loader, Option_data):
         # Training datasets
         tmp = tf.zeros(shape = (self.norm_data.shape[0], self.norm_data.shape[1], 1))
         self.Embedder_data, self.Generator_data, self.Joint_data = self.BuildPipeline(self.norm_data, tmp)
-
-
-        # for (X, W) in self.Generator_data:
-        #     E = self.Generator(W)
-        #     H = self.Embedder(X)
-        #     X_tilde = self.Recovery(H)
-        #
-        # for ((X1, W1), (X2, W2)) in self.joint_data:
-        #     pass
-        # Problem with shuffle function
-
 
         # renorm
         # self.dta = self.norm_data * self.max_val
@@ -102,52 +92,77 @@ class DHGAN(Loader, Option_data):
     def PostProcessGenerated_data(self, X):
         features = X[:,:self.seq_len, :self.dh_features]
         labels = tf.math.maximum(features[:,-1:,0] - self.norm_strike, 0)
-        # labels = labels.reshape((X.shape[0], 1))
         return features, labels
     def BuildPipelineDH(self, X, y):
         dataset = tf.data.Dataset.from_tensor_slices((X, y))
         dataset = dataset.shuffle(buffer_size = 10000).batch(batch_size = self.dh_batch_size, drop_remainder = True)
         return dataset
+    def PreProcessTermStructure(self):
+        termstructure = self.price_array
+        print(termstructure.shape)
+
     def EmbedderNet(self):
         '''
         Latent space map from function space X (bounded random processes F-adapted)
         to target latent space representation
         '''
         model = tf.keras.Sequential(name = 'EmbedderNet')
-        model.add(tf.keras.layers.LSTM(self.dim, input_shape = (self.T, self.dim), activation = 'tanh', return_sequences = True))
-        for layer in range(self.num_layers):
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
-        model.add(tf.keras.layers.Dense(self.hidden_dim, activation = 'sigmoid'))
+        if self.module == 'lstm':
+            model.add(tf.keras.layers.LSTM(self.dim, input_shape = (self.T, self.dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        elif self.module == 'gru':
+            model.add(tf.keras.layers.GRU(self.dim, input_shape = (self.T, self.dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        else:
+            raise AssertionError('Please Choose gru or lstm as module')
+        model.add(TimeDistributed(tf.keras.layers.Dense(self.hidden_dim, activation = 'sigmoid')))
         return model
     def RecoveryNet(self):
         '''
         Inverse map from latent (HxT) space representation to state space of bounded F-adapted random processes
         '''
         model = tf.keras.Sequential(name = 'RecoveryNet')
-        model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
-        for layer in range(self.num_layers):
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
-        model.add(tf.keras.layers.Dense(self.dim, activation = 'sigmoid'))
+        if self.module == 'lstm':
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        elif self.module == 'gru':
+            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        model.add(TimeDistributed(tf.keras.layers.Dense(self.dim, activation = 'sigmoid')))
         return model
     def SupervisorNet(self):
         '''
         map from latent space (HxT)to latent space: Generate next sequence based on previous
         '''
         model = tf.keras.Sequential(name = 'SupervisorNet')
-        model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
-        for layer in range(self.num_layers):
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
-        model.add(tf.keras.layers.Dense(self.hidden_dim, activation = 'sigmoid'))
+        if self.module == 'lstm':
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        elif self.module == 'gru':
+            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        model.add(TimeDistributed(tf.keras.layers.Dense(self.hidden_dim, activation = 'sigmoid')))
         return model
     def GeneratorNet(self):
         '''
         Map from d dimensional Brownian motion (W(omega)xT) to latent space
         '''
         model = tf.keras.Sequential(name = 'GeneratorNet')
-        model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.dim), activation = 'tanh', return_sequences = True))
-        for layer in range(self.num_layers):
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
-        model.add(tf.keras.layers.Dense(self.hidden_dim, activation = 'sigmoid'))
+        if self.module == 'lstm':
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        elif self.module == 'gru':
+            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.T, self.dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        model.add(TimeDistributed(tf.keras.layers.Dense(self.hidden_dim, activation = 'sigmoid')))
         return model
     def DiscriminatorNet(self):
         '''
@@ -155,22 +170,35 @@ class DHGAN(Loader, Option_data):
 
         '''
         model = tf.keras.Sequential(name = 'DiscriminatorNet')
-        model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
-        for layer in range(self.num_layers):
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
-        model.add(tf.keras.layers.Dense(self.hidden_dim, activation = 'linear'))
+        if self.module == 'lstm':
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        elif self.module == 'gru':
+            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.T, self.hidden_dim), activation = 'tanh', return_sequences = True))
+            for layer in range(self.num_layers):
+                model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
+        model.add(TimeDistributed(tf.keras.layers.Dense(self.hidden_dim, activation = 'linear')))
         return model
     def DeepHedgeNet(self):
         model = tf.keras.Sequential(name = 'DeepHedgeNet')
-        model.add(tf.keras.layers.LSTM(self.dh_neurons, activation = None, input_shape = (self.seq_len, self.dh_features)))
-        model.add(tf.keras.layers.RepeatVector(self.seq_len -1))
-        model.add(tf.keras.layers.LSTM(self.dh_neurons, activation = None, recurrent_activation = 'sigmoid', return_sequences = True, recurrent_dropout = 0.2))
-        model.add(tf.keras.layers.LSTM(self.dh_neurons, activation = None, recurrent_activation = 'sigmoid',return_sequences = True))
-        model.add(TimeDistributed(tf.keras.layers.Dense(self.dh_features, activation = 'linear')))
+        if self.module == 'lstm':
+            model.add(tf.keras.layers.LSTM(self.dh_neurons, activation = None, input_shape = (self.seq_len, self.dh_features)))
+            model.add(tf.keras.layers.RepeatVector(self.seq_len -1))
+            model.add(tf.keras.layers.LSTM(self.dh_neurons, activation = None, recurrent_activation = 'sigmoid', return_sequences = True, recurrent_dropout = 0.2))
+            model.add(tf.keras.layers.LSTM(self.dh_neurons, activation = None, recurrent_activation = 'sigmoid',return_sequences = True))
+        elif self.module == 'gru':
+            model.add(tf.keras.layers.GRU(self.dh_neurons, activation = None, input_shape = (self.seq_len, self.dh_features)))
+            model.add(tf.keras.layers.RepeatVector(self.seq_len -1))
+            model.add(tf.keras.layers.GRU(self.dh_neurons, activation = None, recurrent_activation = 'sigmoid', return_sequences = True, recurrent_dropout = 0.2))
+            model.add(tf.keras.layers.GRU(self.dh_neurons, activation = None, recurrent_activation = 'sigmoid',return_sequences = True))
+            model.add(TimeDistributed(tf.keras.layers.Dense(self.dh_features, activation = 'linear')))
         return model
+    @tf.function
     def EmbedderNetLosst0(self, X, X_tilde):
         E_loss_t0 = tf.compat.v1.losses.mean_squared_error(X, X_tilde)
         return E_loss_t0
+    @tf.function
     def EmbedderNetLoss(self, X, X_tilde, G_loss_S):
         E_loss_t0 = self.EmbedderNetLosst0(X, X_tilde)
         E_loss_0 = 10*tf.sqrt(E_loss_t0)
@@ -180,6 +208,7 @@ class DHGAN(Loader, Option_data):
         pass
     def SupervisorNetLoss(self):
         pass
+    @tf.function
     def GeneratorNetLoss(self, y_fake, y_fake_e, H, H_hat_supervise, X_hat, X, gamma = 1):
         G_loss_U = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake), y_fake)
         G_loss_U_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake_e), y_fake_e)
@@ -193,19 +222,18 @@ class DHGAN(Loader, Option_data):
         G_loss_S = tf.compat.v1.losses.mean_squared_error(H[:, 1:, :], H_hat_supervise[:, :-1, :])
         return G_loss_S
     def DiscriminatorNetLoss(self, y_real,y_fake, y_fake_e, gamma = 1):
-        '''
-        y_real activation for discriminator, y_fake activation for discriminator, y_fake_e ?
-        '''
         D_loss_real = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_real), y_real)
         D_loss_fake = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake), y_real)
         D_loss_fake_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake_e), y_fake_e)
         D_loss = D_loss_real + D_loss_fake + gamma * D_loss_fake_e
         return D_loss_real, D_loss_fake, D_loss_fake_e, D_loss
+    @tf.function
     def ReplicationPortfolio(self, X, H):
         dX = X[:, 1:, :] - X[:, :-1, :]
         discrete_integral = tf.reduce_sum(tf.multiply(H, dX), axis = 1)
         trading_strategy = tf.reduce_sum(discrete_integral, axis = 1)
         return trading_strategy
+    @tf.function
     def TransactionCosts(self, epsilon, X, H):
         zeros = tf.zeros(shape = (H.shape[0], 1, H.shape[2]))
         H = tf.concat([zeros, H, zeros], axis = 1)
@@ -213,20 +241,16 @@ class DHGAN(Loader, Option_data):
         dH = tf.abs(dH)
         transaction_costs = tf.multiply(tf.reduce_sum(tf.reduce_sum(tf.multiply(X, dH), axis = 1), axis = 1), epsilon)
         return transaction_costs
+    @tf.function
     def DeepHedgeNetLoss1(self, y, trading_strategy, transaction_costs):
         loss,_ =tf.math.top_k(-(-tf.squeeze(y) + trading_strategy - transaction_costs), tf.cast(self.alpha * self.dh_batch_size, tf.int32))
         loss = tf.reduce_mean(tf.abs(loss))
         return loss
-    def DeepHedgeNetLoss2(self, y, trading_strategy, transaction_costs):
-        loss = tf.reduce_mean(tf.square(-tf.squeeze(y) + trading_strategy - transaction_costs))
-        return loss
-    def train_step(self, model, loss, optimizer, X, y):
-        with tf.GradientTape() as tape:
-            y_pred = model(X, training = True)
-            _loss = loss(pred, y)
-        grads = tape.gradient(_loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        return _loss
+    # def DeepHedgeNetLoss2(self, y, trading_strategy, transaction_costs):
+    #     loss = tf.reduce_mean(tf.square(-tf.squeeze(y) + trading_strategy - transaction_costs))
+    #     return loss
+
+    @tf.function
     def Embedder_train_step(self, X):
         with tf.GradientTape() as embedder_tape, \
                 tf.GradientTape() as recovery_tape:
@@ -238,6 +262,7 @@ class DHGAN(Loader, Option_data):
         Recovery_grads = recovery_tape.gradient(loss, self.Recovery.trainable_variables)
         self.Recovery_optimizer.apply_gradients(zip(Recovery_grads, self.Recovery.trainable_variables))
         return loss
+    @tf.function
     def Supervised_Generator_train_step(self, X, W):
         with tf.GradientTape() as generator_tape, \
                 tf.GradientTape() as supervisor_tape:
@@ -250,6 +275,7 @@ class DHGAN(Loader, Option_data):
         supervisor_grads = supervisor_tape.gradient(loss, self.Supervisor.trainable_variables)
         self.Supervisor_optimizer.apply_gradients(zip(supervisor_grads, self.Supervisor.trainable_variables))
         return loss
+    @tf.function
     def Joint_train_step(self, X1, X2, W1, W2):
         with tf.GradientTape() as embedder_tape, \
                 tf.GradientTape() as recovery_tape, \
@@ -257,7 +283,7 @@ class DHGAN(Loader, Option_data):
                 tf.GradientTape() as supervisor_tape, \
                 tf.GradientTape() as discriminator_tape:
             # Generator training
-            H = self.Embedder(X1)
+            H = self.Embedder(X1, training = True)
             E_hat = self.Generator(W1, training = True)
             H_hat_supervise = self.Supervisor(H)
             H_hat = self.Supervisor(E_hat)
@@ -288,6 +314,7 @@ class DHGAN(Loader, Option_data):
             discriminator_grads = discriminator_tape.gradient(discriminator_loss, self.Discriminator.trainable_variables)
             self.Discriminator_optimizer.apply_gradients(zip(discriminator_grads, self.Discriminator.trainable_variables))
         return G_loss_U, G_loss_S, G_loss, embedder_loss, discriminator_loss
+    @tf.function
     def DeepHedge_train_step(self, X, y):
         with tf.GradientTape() as tape:
             ypred = self.dhmodel(X, training = True)
@@ -297,6 +324,7 @@ class DHGAN(Loader, Option_data):
         grads = tape.gradient(loss, self.dhmodel.trainable_variables)
         self.dhmodel_optimizer.apply_gradients(zip(grads, self.dhmodel.trainable_variables))
         return loss
+    @tf.function
     def DeepHedge_test_step(self, X, y):
         ypred = self.dhmodel(X, training = False)
         strategy = self.ReplicationPortfolio(X, ypred)
@@ -305,9 +333,19 @@ class DHGAN(Loader, Option_data):
         return loss
     def DeepHedgePrice(self):
         '''
-        cumulative hedging strategy, extract initial capital (to be used in DHGAN training)
+        cumulative hedging strategy, extract initial capital
         '''
         pass
+    def PayoffFunction(self, X):
+        return tf.math.maximum(X[:,-1, 0] - self.norm_strike, 0)
+    def TermStructureLoss(self, X, y):
+        '''
+        Loss function of monte carlo prices relative to observed prices
+        '''
+        payoffs = self.PayoffFunction(X)
+        loss = None
+        pass
+
     def train(self, model_names = None, save = False, dhgan_training = False):
         val_loss = []
         save_dir = 'model_saves/DHGAN'
@@ -384,9 +422,6 @@ class DHGAN(Loader, Option_data):
                     print('Batch training loss at step %d: %.4f'% (step, float(np.sqrt(dh_loss*1000))))
                     print("Seen so far: %s samples" % ((step + 1) * 64))
                     tp1 = self.dhmodel(X_batch, training = False)
-                    print('predictions (in sample)')
-                    print(tp1[0, :, :])
-                    print(tp1[1, :, :])
             for X_batch_valid, y_batch_valid in valid_dataset:
                 vloss = self.DeepHedge_test_step(X_batch_valid, y_batch_valid)
                 val_loss.append(float(np.sqrt(vloss)*1000))
@@ -408,9 +443,9 @@ class DHGAN(Loader, Option_data):
         # print('Initiating DeepHedgeGAN joint training')
         # # to be implemented
     def generate_data(self, W, generator, supervisor, recovery):
-        E = Generator(W, training = False)
-        H = Supervisor(E, training = False)
-        X = Recovery(H, training = False)
+        E = generator(W, training = False)
+        H = supervisor(E, training = False)
+        X = recovery(H, training = False)
         return X
     def Renormalize(self, X):
         X = X * self.max_val
@@ -427,6 +462,10 @@ class DHGAN(Loader, Option_data):
         return X, H
     def Hedge_on_data(self, data):
         pass
+    def Simulate_Data(self, W, generator, supervisor, recovery):
+        X = self.generate_data(W, generator, supervisor, recovery)
+        X = self.Renormalize(X)
+        return X
     def restore_model(self, model_name):
         save_dir = 'model_saves/DHGAN'
         model = tf.keras.models.load_model(save_dir + '/{}'.format(model_name))
@@ -436,31 +475,25 @@ class DHGAN(Loader, Option_data):
         models = [tf.keras.models.load_model(save_dir + '/{}'.format(model_name)) for model_name in model_names]
         return models[0], models[1], models[2]
 
-
-
-
-
-
-
 if __name__ == '__main__':
     symbol_list = ['^GSPC', '^VIX', '^NDX', '^RUT', '^DJI',
                 '^FVX','^TNX', '^TYX', 'EURUSD=X','JPY=X']
-    settings = {'module':'lstm',
+    settings = {'module':'gru',
                 'hidden_dim':24,
                 'num_layers': 3,
-                'iterations': 500,
+                'iterations': 20000,
                 'batch_size': 100,
                 'learning_rate':0.001}
-    DH_settings = {'hedge_simulations': 500000,
-                    'hedge_features': 1,
-                    'hedge_epochs': 50,
-                    'hedge_batch_size': 100,
+    DH_settings = {'hedge_simulations': 1000000,
+                    'hedge_features': 2,
+                    'hedge_epochs': 1000,
+                    'hedge_batch_size': 1000,
                     'hedge_neurons': 70,
-                    'hedge_learning_rate': 0.001,
+                    'hedge_learning_rate': 0.0001,
                     'hedge_validation_proportion':0.1,
                     'hedge_test_proportion':0.001,
                     'alpha':0.99,
-                    'epsilon':0.00,
+                    'epsilon':0.00001,
                     'strike':3200}
     datafolder_path = 'datafolder'
     filename = 'quotedata_SPX.csv'
@@ -476,5 +509,11 @@ if __name__ == '__main__':
                 'maturities':ttms}
     Model = DHGAN(symbol_list,settings, DH_settings, option_data ,option_settings)
     model_names = ['Generator', 'Supervisor', 'Recovery', 'dhmodel']
-    Model.train(model_names, save = False)
+    Model.train(model_names, save = True)
+    W = Model.BrownianMotion(10, 21, 10)
+    X = Model.Simulate_Data(W, Model.Generator, Model.Supervisor, Model.Recovery)
+    plt.plot(X[0, :,0])
+    plt.plot(X[1, :,0])
+    plt.plot(X[2, :,0])
+    plt.show()
     # Model.test(Model.Generator_data)
