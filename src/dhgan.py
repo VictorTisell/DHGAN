@@ -157,23 +157,25 @@ class DHGAN(Loader, Option_data):
         inp = tf.keras.layers.Input(shape = (self.seq_len, self.dim))
         if self.module == 'lstm':
             X = tf.keras.layers.LSTM(self.dh_neurons, return_sequences = False)(inp)
+            X = tf.keras.layers.BatchNormalization()(X)
             T1 = tf.keras.layers.RepeatVector(self.maturities[0]-1)(X)
             T2 = tf.keras.layers.RepeatVector(self.maturities[1]-1)(X)
             T3 = tf.keras.layers.RepeatVector(self.maturities[2]-1)(X)
-            T1 = tf.keras.layers.LSTM(self.dh_neurons, return_sequences = True)(T1)
-            T2 = tf.keras.layers.LSTM(self.dh_neurons, return_sequences = True)(T2)
-            T3 = tf.keras.layers.LSTM(self.dh_neurons, return_sequences = True)(T3)
+            T1 = tf.keras.layers.LSTM(self.dh_neurons, activation = 'elu', return_sequences = True)(T1)
+            T2 = tf.keras.layers.LSTM(self.dh_neurons, activation = 'elu', return_sequences = True)(T2)
+            T3 = tf.keras.layers.LSTM(self.dh_neurons, activation = 'elu', return_sequences = True)(T3)
         elif self.module == 'gru':
             X = tf.keras.layers.GRU(self.dh_neurons, return_sequences = False)(inp)
+            X = tf.keras.layers.BatchNormalization()(X)
             T1 = tf.keras.layers.RepeatVector(self.maturities[0]-1)(X)
             T2 = tf.keras.layers.RepeatVector(self.maturities[1]-1)(X)
             T3 = tf.keras.layers.RepeatVector(self.maturities[2]-1)(X)
-            T1 = tf.keras.layers.GRU(self.dh_neurons, return_sequences = True)(T1)
-            T2 = tf.keras.layers.GRU(self.dh_neurons, return_sequences = True)(T2)
-            T3 = tf.keras.layers.GRU(self.dh_neurons, return_sequences = True)(T3)
-        T1 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.dh_features * len(self.strikes)))(T1)
-        T2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.dh_features * len(self.strikes)))(T2)
-        T3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.dh_features * len(self.strikes)))(T3)
+            T1 = tf.keras.layers.GRU(self.dh_neurons, activation = 'elu', return_sequences = True)(T1)
+            T2 = tf.keras.layers.GRU(self.dh_neurons, activation = 'elu', return_sequences = True)(T2)
+            T3 = tf.keras.layers.GRU(self.dh_neurons, activation = 'elu', return_sequences = True)(T3)
+        T1 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.dh_features * len(self.strikes), activation = 'linear'))(T1)
+        T2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.dh_features * len(self.strikes), activation = 'linear'))(T2)
+        T3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.dh_features * len(self.strikes), activation = 'linear'))(T3)
         model = tf.keras.Model(inputs = inp, outputs = [T1, T2, T3], name = 'DeepHedgeNet')
         return model
     @tf.function
@@ -258,27 +260,24 @@ class DHGAN(Loader, Option_data):
             cost1 = self.TransactionCosts(self.epsilon, X1, H1)
             Y1 = tf.math.maximum(X1[:,-1:, 0] - K1, 0)
             loss1 = self.DeepHedgeNetLoss1(Y1, strategy1, cost1)
-            zeros = tf.zeros(shape = Y1.shape)
-            p01 = self.DeepHedgeNetLoss2(Y1, strategy1, cost1) - self.DeepHedgeNetLoss2(zeros, strategy1, cost1)
-            P01.append(p01)
+            p01 = strategy1 - cost1
+            P01.append(p01[0, 0])
             L1.append(loss1)
 
             strategy2 = self.ReplicationPortfolio(X2, H2)
             cost2 = self.TransactionCosts(self.epsilon, X2, H2)
             Y2 = tf.math.maximum(X2[:,-1:, 0] - K2, 0)
             loss2 = self.DeepHedgeNetLoss1(Y2, strategy2, cost2)
-            zeros = tf.zeros(shape = Y2.shape)
-            p02 = self.DeepHedgeNetLoss2(Y2, strategy2, cost2) - self.DeepHedgeNetLoss2(zeros, strategy2, cost2)
-            P02.append(p02)
+            p02 = strategy2 - cost2
+            P02.append(p02[0, 0])
             L2.append(loss2)
 
             strategy3 = self.ReplicationPortfolio(X3, H3)
             cost3 = self.TransactionCosts(self.epsilon, X3, H3)
             Y3 = tf.math.maximum(X3[:,-1:, 0] - K3, 0)
             loss3 = self.DeepHedgeNetLoss1(Y3, strategy3, cost3)
-            zeros = tf.zeros(shape = Y3.shape)
-            p03 = self.DeepHedgeNetLoss2(Y3, strategy3, cost3) - self.DeepHedgeNetLoss2(zeros, strategy3, cost3)
-            P03.append(p03)
+            p03 = strategy3 - cost3
+            P03.append(p03[0, 0])
             L3.append(loss3)
         P01 = tf.convert_to_tensor(P01, dtype = tf.float32)
         P02 = tf.convert_to_tensor(P02, dtype = tf.float32)
@@ -290,16 +289,19 @@ class DHGAN(Loader, Option_data):
         if loss_type == 'type1':
             replication_prices = tf.concat([P01, P02, P03], axis = 0)
             replication_loss = tf.keras.losses.mse(replication_prices, market_prices)
+            price_error = None
         elif loss_type == 'type2':
             replication_prices = tf.concat([L1, L2, L3], axis = 0)
             replication_loss = tf.keras.losses.mse(replication_prices, market_prices)
+            price_error = None
         elif loss_type == 'type3':
             losses = tf.concat([L1, L2, L3], axis = 0)
             replication_loss = tf.reduce_mean(tf.square(losses))
-            replication_prices = losses
+            replication_prices = tf.concat([P01, P02, P03], axis = 0)
+            price_error = tf.keras.losses.mse(replication_prices, market_prices)
         else:
             raise NotImplementedError
-        return replication_loss, replication_prices
+        return replication_loss, replication_prices, price_error
     @tf.function
     def Embedder_train_step(self, X):
         with tf.GradientTape() as tape:
@@ -360,10 +362,10 @@ class DHGAN(Loader, Option_data):
             X_hat = self.Recovery(H_hat, training = True)
             X_renorm = self.Renormalize_tf(X_hat)
             hedge_weights = self.dhmodel(X_renorm, training = True)
-            termstructure_replication_loss,replication_prices  = self.DHTermStructureLoss(hedge_weights, X_renorm, loss_type = 'type3')
+            termstructure_replication_loss,replication_prices, price_error  = self.DHTermStructureLoss(hedge_weights, X_renorm, loss_type = 'type3')
         dh_grads = tape.gradient(termstructure_replication_loss, self.dhmodel.trainable_variables)
         self.dhmodel_optimizer.apply_gradients(zip(dh_grads, self.dhmodel.trainable_variables))
-        return termstructure_replication_loss, replication_prices
+        return termstructure_replication_loss, replication_prices, price_error
     @tf.function
     def DHGAN_train_step(self,X, W):
         with tf.GradientTape(persistent = True)  as tape:
@@ -380,7 +382,7 @@ class DHGAN(Loader, Option_data):
             X_renorm = self.Renormalize_tf(X_hat)
             # X_renorm = X_renorm[:,:,:self.dh_features]
             hedge_weights = self.dhmodel(X_renorm, training = True)
-            termstructure_replication_loss,replication_prices  = self.DHTermStructureLoss(hedge_weights, X_renorm, loss_type = 'type3')
+            termstructure_replication_loss,replication_prices ,price_error  = self.DHTermStructureLoss(hedge_weights, X_renorm, loss_type = 'type3')
         generator_grads = tape.gradient(G_loss, self.Generator.trainable_variables + self.Supervisor.trainable_variables)
         self.Generator_optimizer.apply_gradients(zip(generator_grads, self.Generator.trainable_variables + self.Supervisor.trainable_variables))
         embedder_grads = tape.gradient(embedder_loss, self.Embedder.trainable_variables + self.Recovery.trainable_variables)
@@ -388,7 +390,7 @@ class DHGAN(Loader, Option_data):
         dhvars = self.Generator.trainable_variables + self.Supervisor.trainable_variables + self.Recovery.trainable_variables + self.dhmodel.trainable_variables
         dh_grads = tape.gradient(termstructure_replication_loss,dhvars)
         self.dhmodel_optimizer.apply_gradients(zip(dh_grads, dhvars))
-        return termstructure_replication_loss, replication_prices, G_loss, embedder_loss
+        return termstructure_replication_loss, replication_prices,price_error ,G_loss, embedder_loss
 
     def train(self, model_names = None, save = False):
         save_dir = 'model_saves/DHGAN'
@@ -436,10 +438,11 @@ class DHGAN(Loader, Option_data):
         print('Initiating Deep Hedge Pre-Training')
         for iteration in range(self.iterations):
             W = self.BrownianMotion(self.batch_size, self.seq_len, self.W_dim)
-            termstructure_replication_loss, replication_prices = self.DH_train_step(W)
+            termstructure_replication_loss, replication_prices, price_error = self.DH_train_step(W)
             if iteration % 1000 == 0:
                 print('---------------------------------------------------------------')
                 print('Batch training termstructure replication loss at iteration %d: %.4f'% (iteration, float(termstructure_replication_loss)))
+                print('Batch training pricing error at iteration %d: %.4f'% (iteration, float(price_error)))
                 print('Batch training termstructure replication prices: {}'.format(replication_prices))
                 print('---------------------------------------------------------------')
         if save:
@@ -451,7 +454,7 @@ class DHGAN(Loader, Option_data):
             for kk in range(2):
                 X1 = self.sample_batch(self.norm_data)
                 W1 = self.BrownianMotion(X1.shape[0], X1.shape[1], X1.shape[2])
-                termstructure_replication_loss, replication_prices, generator_loss, embedder_loss = self.DHGAN_train_step(X1, W1)
+                termstructure_replication_loss, replication_prices, price_error, generator_loss, embedder_loss = self.DHGAN_train_step(X1, W1)
             X2 = self.sample_batch(self.norm_data)
             W2 = self.BrownianMotion(X2.shape[0], X2.shape[1], X2.shape[2])
             discriminator_loss = self.Discriminator_train_step(X2, W2)
@@ -461,6 +464,7 @@ class DHGAN(Loader, Option_data):
                 print('Batch training generator loss at iteration %d: %.4f'% (iteration, float(generator_loss)))
                 print('Batch training embedder loss at iteration %d: %.4f'% (iteration, float(np.sqrt(embedder_loss))))
                 print('Batch training termstructure replication loss at iteration %d: %.4f'% (iteration, float(termstructure_replication_loss)))
+                print('Batch training pricing error at iteration %d: %.4f'% (iteration, float(price_error)))
                 print('Batch training termstructure replication prices: {}'.format(replication_prices))
                 market_prices = tf.cast(self.price_array[:, 2], dtype = tf.float32)
                 print('Actual Prices: {}'.format(market_prices))
@@ -500,10 +504,9 @@ class DHGAN(Loader, Option_data):
         X = X * tf.convert_to_tensor(np.asarray(self.starting_values), dtype = tf.float32)
         return X
     def Simulate_Hedge(self, W, generator, supervisor, recovery, dhmodel):
-        X = generate_data(W, generator, supervisor, recovery)
-        X_h = X[:,:,:self.dh_features]
-        H = dhmodel(X_h)
+        X = self.generate_data(W, generator, supervisor, recovery)
         X = self.Renormalize(X)
+        H = dhmodel(X)
         return X, H
     def Hedge_on_data(self, data):
         pass
@@ -519,17 +522,20 @@ class DHGAN(Loader, Option_data):
         save_dir = 'model_saves/DHGAN'
         models = [tf.keras.models.load_model(save_dir + '/{}'.format(model_name)) for model_name in model_names]
         return models[0], models[1], models[2]
-
+    def RestoreDHGAN(self, model_names):
+        save_dir = 'model_saves/DHGAN'
+        models = [tf.keras.models.load_model(save_dir + '/{}'.format(model_name)) for model_name in model_names]
+        return models[0], models[1], models[2], models[3]
 if __name__ == '__main__':
     print(device_lib.list_local_devices())
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
     symbol_list = ['^GSPC', '^VIX', '^NDX', '^RUT', '^DJI',
                 '^FVX','^TNX', '^TYX', 'EURUSD=X','JPY=X']
-    settings = {'module':'gru',
+    settings = {'module':'lstm',
                 'hidden_dim':24,
                 'latent_dim': 5,
                 'num_layers': 3,
-                'iterations': 10000,
+                'iterations': 30000,
                 'batch_size': 100,
                 'learning_rate':0.001}
     DH_settings = {'hedge_simulations': 1000000,
@@ -537,10 +543,10 @@ if __name__ == '__main__':
                     'hedge_epochs': 2,
                     'hedge_batch_size': 1000,
                     'hedge_neurons': 70,
-                    'hedge_learning_rate': 0.0001,
+                    'hedge_learning_rate': 0.00001,
                     'hedge_validation_proportion':0.1,
                     'hedge_test_proportion':0.001,
-                    'alpha':0.5,
+                    'alpha':0.99,
                     'epsilon':0.0,
                     'strike':3200}
     datafolder_path = 'datafolder'
@@ -559,11 +565,13 @@ if __name__ == '__main__':
 
     model_names = ['Generator', 'Supervisor', 'Recovery', 'dhmodel']
     Model.train(model_names, save = True)
-    # gen, sup, rec = Model.RestoreGAN(model_names[0:3])
-    # W = Model.BrownianMotion(100, 21, 10)
-    #
-    # X = Model.Simulate_Data(W, gen, sup, rec)
-    # for i in range(100):
-    #     plt.plot(X[i, :,0])
-    # plt.show()
+    gen, sup, rec, dh = Model.RestoreDHGAN(model_names)
+    W = Model.BrownianMotion(100, 31, 10)
+    X, H = Model.Simulate_Hedge(W, gen, sup, rec, dh)
+    print(X)
+    print('aldkfjalskjfd')
+    print(H)
+    for i in range(15):
+        plt.plot(X[i, :,0])
+    plt.show()
     # Model.test(Model.Generator_data)
