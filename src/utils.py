@@ -6,7 +6,7 @@ import datetime
 
 class Loader:
     def __init__(self, symbol = '^GSPC', symbol_list = None, start=datetime.date(2000, 1, 1),
-                end = datetime.date(2020,9,11), seq_len = 21, standard = False):
+                end = datetime.date(2020,9,11), seq_len = 31, standard = False):
         self.symbol = symbol
         self.symbol_list = symbol_list
         self.start = start
@@ -141,9 +141,10 @@ class Option_data(QL_Helpers):
         df.dropna(inplace = True)
         df = df.loc[(df['Strike'].isin(self.strikes)) & (df['Expiration Date'].isin(tmp))]
         df.set_index('Expiration Date', drop = True,inplace = True)
-        sub_array = np.asarray(df[['Strike', 'Ask']])
         iv_array = np.asarray(df[['Strike', 'IV']])
         df['ttm'] = df.index - self.ql_to_dt(self.start_ql)
+        df['ttm'] = df['ttm'].dt.days
+        sub_array = np.asarray(df[['Strike','ttm', 'Ask']])
         return df, sub_array, iv_array
     def GBM(S0, r, sigma, timesteps, dt ,nb_sims, nb_assets, corr):
         features = np.zeros(shape = (nb_sims, timesteps, nb_assets))
@@ -158,7 +159,7 @@ if __name__ == '__main__':
     data = pd.read_csv(filepath, sep = ';')
     calendar = ql.UnitedStates()
     Ks = [3000, 3100, 3200, 3300, 3400]
-    ttms = [0, 10, 21, 31, 62]
+    ttms = [10, 21, 31, 62]
     settings = {'start': datetime.date(2020,9,11),
                 'day_count': ql.Actual365Fixed(),
                 'calendar': ql.UnitedStates(),
