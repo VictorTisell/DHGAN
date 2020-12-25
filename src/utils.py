@@ -3,7 +3,7 @@ import numpy as np
 import QuantLib as ql
 import pandas_datareader as pdr
 import datetime
-
+import tensorflow as tf
 class Loader:
     def __init__(self, symbol = '^GSPC', symbol_list = None, start=datetime.date(2000, 1, 1),
                 end = datetime.date(2020,9,11), seq_len = 31, standard = False):
@@ -119,6 +119,16 @@ class QL_Helpers:
 
     def year_fraction(date, ttm):
         return [day_count.yearFraction(date, date + int(nd)) for nd in ttm]
+    def GeneratePaths(self, process, maturity, nPaths, nSteps):
+        generator = ql.UniformRandomGenerator()
+        sequenceGenerator = ql.UniformRandomSequenceGenerator(nSteps, generator)
+        gaussianSequenceGenerator = ql.GaussianRandomSequenceGenerator(sequenceGenerator)
+        paths = np.zeros(shape = ((nPaths), nSteps + 1))
+        pathGenerator = ql.GaussianPathGenerator(process, maturity, nSteps, gaussianSequenceGenerator, False)
+        for i in range(nPaths):
+            path = pathGenerator.next().value()
+            paths[i, :] = np.array([path[j] for j in range(nSteps + 1)])
+        return paths
 class Option_data(QL_Helpers):
     def __init__(self, option_data, option_settings_dict):
         super().__init__()
@@ -150,8 +160,50 @@ class Option_data(QL_Helpers):
         features = np.zeros(shape = (nb_sims, timesteps, nb_assets))
         features[:,0, :] = S0
         pass
-
-
+class Losses:
+    def __init_(self):
+        pass
+    @tf.function
+    def EmbedderNetLosst0(self, X, X_tilde):
+        E_loss_t0 = tf.compat.v1.losses.mean_squared_error(X, X_tilde)
+        return E_loss_t0
+    @tf.function
+    def EmbedderNetLoss(self, X, X_tilde, G_loss_S):
+        E_loss_t0 = self.EmbedderNetLosst0(X, X_tilde)
+        E_loss_0 = 10*tf.sqrt(E_loss_t0)
+        E_loss = E_loss0 + 0.1 * G_loss_S
+        return E_loss_t0, E_loss_0, E_loss
+    @tf.function
+    def GeneratorNetLoss(self, y_fake, y_fake_e, H, H_hat_supervise, X_hat, X, gamma = 1):
+        G_loss_U = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake), y_fake)
+        G_loss_U_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake_e), y_fake_e)
+        G_loss_S = self.GeneratorNet_SupervisedLoss(H, H_hat_supervise)
+        G_loss_V1 = tf.reduce_mean(tf.abs(tf.sqrt(tf.nn.moments(X_hat,[0])[1] + 1e-6) - tf.sqrt(tf.nn.moments(X,[0])[1] + 1e-6)))
+        G_loss_V2 = tf.reduce_mean(tf.abs((tf.nn.moments(X_hat,[0])[0]) - (tf.nn.moments(X,[0])[0])))
+        G_loss_V = G_loss_V1 + G_loss_V2
+        G_loss = G_loss_U + gamma * G_loss_U_e + 100 * tf.sqrt(G_loss_S) + 100 * G_loss_V
+        return G_loss_U, G_loss_U_e, G_loss_S, G_loss_V1, G_loss_V2, G_loss_V, G_loss
+    @tf.function
+    def GeneratorNet_SupervisedLoss(self, H, H_hat_supervise):
+        G_loss_S = tf.compat.v1.losses.mean_squared_error(H[:, 1:, :], H_hat_supervise[:, :-1, :])
+        return G_loss_S
+    @tf.function
+    def DiscriminatorNetLoss(self, y_real,y_fake, y_fake_e, gamma = 1):
+        D_loss_real = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_real), y_real)
+        D_loss_fake = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake), y_real)
+        D_loss_fake_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake_e), y_fake_e)
+        D_loss = D_loss_real + D_loss_fake + gamma * D_loss_fake_e
+        return D_loss_real, D_loss_fake, D_loss_fake_e, D_loss
+    def GenNetLoss(self):
+        '''
+        regular average generator loss
+        '''
+        pass
+    def DiscNetLoss(self):
+        '''
+        regular discriminator loss
+        '''
+        pass
 if __name__ == '__main__':
     datafolder_path = 'datafolder'
     filename = 'quotedata_SPX.csv'
