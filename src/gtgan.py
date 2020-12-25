@@ -252,22 +252,28 @@ class GTGAN(Loader, Option_data, Losses):
         # alternatively add generator vars
         return loss
     @tf.function
+    def Unsupervised_Generator_train_step_body(self, X1, W1):
+        '''
+        performance enhancing on GPU (colab)
+        '''
+        H = self.Embedder(X1)
+        E_hat = self.Generator(W1, training = True)
+        H_hat = self.Supervisor(E_hat)
+        H_hat_supervise = self.Supervisor(H)
+        X_hat = self.Recovery(H_hat)
+        y_fake = self.Discriminator(H_hat)
+        y_fake_e = self.Discriminator(E_hat)
+        G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X1)
+        # Embedder training
+        X_tilde = self.Recovery(H, training = True)
+        embedder_loss = self.EmbedderNetLosst0(X1, X_tilde)
+        return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
+    @tf.function
     def Unsupervised_Generator_train_step(self, X1, W1):
         with tf.GradientTape(persistent = True) as tape:
-            H = self.Embedder(X1)
-            E_hat = self.Generator(W1, training = True)
-            H_hat = self.Supervisor(E_hat)
-            H_hat_supervise = self.Supervisor(H)
-            X_hat = self.Recovery(H_hat)
-            y_fake = self.Discriminator(H_hat)
-            y_fake_e = self.Discriminator(E_hat)
-            G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X1)
-            # Embedder training
-            X_tilde = self.Recovery(H, training = True)
-            embedder_loss = self.EmbedderNetLosst0(X1, X_tilde)
+            G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss = self.Unsupervised_Generator_train_step_body(X1, W1)
         generator_grads = tape.gradient(G_loss, self.Generator.trainable_variables + self.Supervisor.trainable_variables)
         self.Generator_optimizer.apply_gradients(zip(generator_grads, self.Generator.trainable_variables + self.Supervisor.trainable_variables))
-
         embedder_grads = tape.gradient(embedder_loss, self.Embedder.trainable_variables + self.Recovery.trainable_variables)
         self.Embedder_optimizer.apply_gradients(zip(embedder_grads, self.Embedder.trainable_variables + self.Recovery.trainable_variables))
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
@@ -431,7 +437,7 @@ if __name__ == '__main__':
                 '^FVX','^TNX', '^TYX', 'EURUSD=X','JPY=X']
     settings = {'module':'gru',
                 'hidden_dim':24,
-                'latent_dim': 2,
+                'latent_dim': 4,
                 'num_layers': 3,
                 'iterations': 30000,
                 'batch_size': 128,
