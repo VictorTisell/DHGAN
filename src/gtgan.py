@@ -163,23 +163,23 @@ class GTGAN(Loader, Option_data, Losses):
     def RegressionNet(self):
         inp = tf.keras.layers.Input(batch_shape = (self.batch_size, self.seq_len, self.dim))
         if self.module == 'lstm':
-            X = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'elu', return_sequences = False)(inp)
+            X = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'tanh', return_sequences = False)(inp)
             X = tf.keras.layers.BatchNormalization()(X)
             T1 = tf.keras.layers.RepeatVector(self.maturities[0]-1)(X)
             T2 = tf.keras.layers.RepeatVector(self.maturities[1]-1)(X)
             T3 = tf.keras.layers.RepeatVector(self.maturities[2]-1)(X)
-            T1 = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'elu', return_sequences = True)(T1)
-            T2 = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'elu', return_sequences = True)(T2)
-            T3 = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'elu', return_sequences = True)(T3)
+            T1 = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'tanh', return_sequences = True)(T1)
+            T2 = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'tanh', return_sequences = True)(T2)
+            T3 = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'tanh', return_sequences = True)(T3)
         elif self.module == 'gru':
-            X = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'elu', return_sequences = False)(inp)
+            X = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'tanh', return_sequences = False)(inp)
             X = tf.keras.layers.BatchNormalization()(X)
             T1 = tf.keras.layers.RepeatVector(self.maturities[0]-1)(X)
             T2 = tf.keras.layers.RepeatVector(self.maturities[1]-1)(X)
             T3 = tf.keras.layers.RepeatVector(self.maturities[2]-1)(X)
-            T1 = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'elu', return_sequences = True)(T1)
-            T2 = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'elu', return_sequences = True)(T2)
-            T3 = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'elu', return_sequences = True)(T3)
+            T1 = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'tanh', return_sequences = True)(T1)
+            T2 = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'tanh', return_sequences = True)(T2)
+            T3 = tf.keras.layers.GRU(self.regression_hidden_dim, activation = 'tanh', return_sequences = True)(T3)
         T1 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.regression_features * len(self.strikes), activation = 'linear'))(T1)
         T2 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.regression_features * len(self.strikes), activation = 'linear'))(T2)
         T3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.regression_features * len(self.strikes), activation = 'linear'))(T3)
@@ -202,24 +202,35 @@ class GTGAN(Loader, Option_data, Losses):
         X1 = X[:,:self.maturities[0], :self.regression_features]
         X2 = X[:,:self.maturities[1], :self.regression_features]
         X3 = X[:,:self.maturities[2], :self.regression_features]
+        dX1 = X1[:, 1:, :] - X1[:, :-1, :]
+        dX2 = X2[:, 1:, :] - X2[:, :-1, :]
+        dX3 = X3[:, 1:, :] - X3[:, :-1, :]
         for (H1, K1),(H2, K2),(H3, K3) in zip(HKT1, HKT2, HKT3):
-            dX1 = X1[:, 1:, :] - X1[:, :-1, :]
-            # Yhat1 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H1, dX1), axis = 1), axis = 1)
-            Yhat1 = tf.reduce_sum(tf.multiply(H1, X1[:, :-1, :]), axis = 1)
-            P01.append(tf.reduce_mean(Yhat1))
+            Yhat1 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H1, dX1), axis = 1), axis = 1)
+            # Yhat1 = tf.reduce_sum(tf.multiply(H1, X1[:, :-1, :]), axis = 1)
+            p01 = H1[:, 0, :] * X1[:, 0, :]
+            P01.append(tf.reduce_mean(p01))
             Y1 = tf.math.maximum(X1[:,-1:, 0] - K1, 0)
+            Y1 = tf.squeeze(Y1)
             loss1 =tf.reduce_mean((Y1-Yhat1))
             L1.append(loss1)
 
-            Yhat2 = tf.reduce_sum(tf.multiply(H2, X2[:, :-1, :]), axis = 1)
-            P02.append(tf.reduce_mean(Yhat2))
+
+            Yhat2 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H2, dX2), axis = 1), axis = 1)
+            # Yhat2 = tf.reduce_sum(tf.multiply(H2, X2[:, :-1, :]), axis = 1)
+            p02 = H2[:, 0, :] * X2[:, 0, :]
+            P02.append(tf.reduce_mean(p02))
             Y2 = tf.math.maximum(X2[:,-1:, 0] - K2, 0)
+            Y2 = tf.squeeze(Y1)
             loss2 = tf.reduce_mean((Y2-Yhat2))
             L2.append(loss2)
 
-            Yhat3 = tf.reduce_sum(tf.multiply(H3, X3[:, :-1, :]), axis = 1)
-            P03.append(tf.reduce_mean(Yhat3))
+            # Yhat3 = tf.reduce_sum(tf.multiply(H3, X3[:, :-1, :]), axis = 1)
+            Yhat3 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H3, dX3), axis = 1), axis = 1)
+            p03 = H2[:, 0, :] * X2[:, 0, :]
+            P03.append(tf.reduce_mean(p03))
             Y3 = tf.math.maximum(X3[:,-1:, 0] - K3, 0)
+            Y3 = tf.squeeze(Y3)
             loss3 = tf.reduce_mean(Y3-Yhat3)
             L3.append(loss3)
         P01 = tf.convert_to_tensor(P01, dtype = tf.float32)
@@ -239,7 +250,7 @@ class GTGAN(Loader, Option_data, Losses):
         replication_prices = tf.concat([P01, P02, P03], axis = 0)
         price_error = tf.keras.losses.mse(replication_prices, market_prices)
         return replication_loss, replication_prices, price_error, market_prices
-    #@tf.function
+    @tf.function
     def Embedder_train_step(self, X):
         with tf.GradientTape() as tape:
             H = self.Embedder(X, training = True)
@@ -248,7 +259,7 @@ class GTGAN(Loader, Option_data, Losses):
         grads = tape.gradient(loss, self.Embedder.trainable_variables + self.Recovery.trainable_variables)
         self.Embedder_optimizer.apply_gradients(zip(grads, self.Embedder.trainable_variables + self.Recovery.trainable_variables))
         return loss
-    #@tf.function
+    @tf.function
     def Supervised_Generator_train_step(self, X):
         with tf.GradientTape() as tape:
             H = self.Embedder(X)
@@ -258,7 +269,7 @@ class GTGAN(Loader, Option_data, Losses):
         self.Supervisor_optimizer.apply_gradients(zip(grads, self.Supervisor.trainable_variables))
         # alternatively add generator vars
         return loss
-    #@tf.function
+    @tf.function
     def Generator_train_step(self, X, W):
         with tf.GradientTape(persistent = True) as tape:
             H = self.Embedder(X)
@@ -276,7 +287,7 @@ class GTGAN(Loader, Option_data, Losses):
         generator_grads = tape.gradient(G_loss, generator_vars)
         embedder_grads = tape.gradient(embedder_loss, embedder_vars)
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
-    #@tf.function
+    @tf.function
     def Discriminator_train_step(self, X, W):
         with tf.GradientTape() as tape:
             H = self.Embedder(X, training = True)
@@ -289,7 +300,7 @@ class GTGAN(Loader, Option_data, Losses):
         discriminator_grads = tape.gradient(discriminator_loss, self.Discriminator.trainable_variables)
         self.Discriminator_optimizer.apply_gradients(zip(discriminator_grads, self.Discriminator.trainable_variables))
         return discriminator_loss
-    #@tf.function
+    @tf.function
     def Regression_train_step(self, W, gbm = False):
         with tf.GradientTape() as tape:
             E_hat = self.Generator(W, training = True)
@@ -301,7 +312,7 @@ class GTGAN(Loader, Option_data, Losses):
         regression_grads = tape.gradient(replication_loss, self.Regression.trainable_variables)
         self.Regression_optimizer.apply_gradients(zip(regression_grads, self.Regression.trainable_variables))
         return replication_loss, replication_prices, price_error, market_prices
-    #@tf.function
+    @tf.function
     def Transform_train_step(self, W, gbm = False, replication_regularizer = 10, unsupervised_regularizer = 100):
         with tf.GradientTape() as tape:
             E_hat = self.Generator(W, training = True)
@@ -439,7 +450,7 @@ if __name__ == '__main__':
     symbol_list = ['^GSPC', '^VIX', '^NDX', '^RUT', '^DJI',
                 '^FVX','^TNX', '^TYX', 'EURUSD=X','JPY=X']
     settings = {'module':'lstm',
-                'hidden_dim':24,
+                'hidden_dim': 24,
                 'latent_dim': 2,
                 'num_layers': 3,
                 'iterations': 50,
