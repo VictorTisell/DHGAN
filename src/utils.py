@@ -163,40 +163,45 @@ class Option_data(QL_Helpers):
 class Losses:
     def __init_(self):
         pass
-    @tf.function
+    #@tf.function
     def EmbedderNetLosst0(self, X, X_tilde):
         E_loss_t0 = tf.compat.v1.losses.mean_squared_error(X, X_tilde)
         return E_loss_t0
-    @tf.function
+    #@tf.function
     def EmbedderNetLoss(self, X, X_tilde, G_loss_S):
         E_loss_t0 = self.EmbedderNetLosst0(X, X_tilde)
         E_loss_0 = 10*tf.sqrt(E_loss_t0)
         E_loss = E_loss0 + 0.1 * G_loss_S
         return E_loss_t0, E_loss_0, E_loss
-    @tf.function
+    def BCE(self):
+        return tf.keras.losses.BinaryCrossentropy(from_logits = True)
     def GeneratorNetLoss(self, y_fake, y_fake_e, H, H_hat_supervise, X_hat, X, gamma = 1):
-        G_loss_U = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake), y_fake)
-        G_loss_U_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake_e), y_fake_e)
+        bce = tf.keras.losses.BinaryCrossentropy(from_logits = True)
+        G_loss_U = bce(tf.ones_like(y_fake), y_fake)
+        G_loss_U1 = bce(tf.ones_like(y_fake), y_fake)
+        G_loss_U_e = bce(tf.ones_like(y_fake_e), y_fake_e)
         G_loss_S = self.GeneratorNet_SupervisedLoss(H, H_hat_supervise)
         G_loss_V1 = tf.reduce_mean(tf.abs(tf.sqrt(tf.nn.moments(X_hat,[0])[1] + 1e-6) - tf.sqrt(tf.nn.moments(X,[0])[1] + 1e-6)))
         G_loss_V2 = tf.reduce_mean(tf.abs((tf.nn.moments(X_hat,[0])[0]) - (tf.nn.moments(X,[0])[0])))
         G_loss_V = G_loss_V1 + G_loss_V2
         G_loss = G_loss_U + gamma * G_loss_U_e + 100 * tf.sqrt(G_loss_S) + 100 * G_loss_V
         return G_loss_U, G_loss_U_e, G_loss_S, G_loss_V1, G_loss_V2, G_loss_V, G_loss
-    @tf.function
+    #@tf.function
     def GeneratorNet_UnsupervisedLoss(self, y_fake, y_fake_e, gamma = 1):
-        G_loss_U = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake), y_fake)
-        G_loss_U_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake_e), y_fake_e)
+        bce = tf.keras.losses.BinaryCrossentropy(from_logits = True)
+        G_loss_U = bce(tf.ones_like(y_fake), y_fake)
+        G_loss_U_e = bce(tf.ones_like(y_fake_e), y_fake_e)
         return G_loss_U + gamma *G_loss_U_e
-    @tf.function
+    #@tf.function
     def GeneratorNet_SupervisedLoss(self, H, H_hat_supervise):
         G_loss_S = tf.compat.v1.losses.mean_squared_error(H[:, 1:, :], H_hat_supervise[:, :-1, :])
         return G_loss_S
-    @tf.function
+    #@tf.function
     def DiscriminatorNetLoss(self, y_real,y_fake, y_fake_e, gamma = 1):
-        D_loss_real = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_real), y_real)
-        D_loss_fake = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake), y_fake)
-        D_loss_fake_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake_e), y_fake_e)
+        bce = tf.keras.losses.BinaryCrossentropy(from_logits = True)
+        D_loss_real = bce(tf.ones_like(y_real), y_real)
+        D_loss_fake = bce(tf.zeros_like(y_fake), y_fake)
+        D_loss_fake_e = bce(tf.zeros_like(y_fake_e), y_fake_e)
         D_loss = D_loss_real + D_loss_fake + gamma * D_loss_fake_e
         return D_loss_real, D_loss_fake, D_loss_fake_e, D_loss
     def GenNetLoss(self):

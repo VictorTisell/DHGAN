@@ -69,7 +69,7 @@ class GTGAN(Loader, Option_data, Losses):
         d1 = (np.log(S0/K) + (r + 0.5 * sigma **2) * T) /(sigma * np.sqrt(T))
         d2 = (np.log(S0/K) + (r - 0.5 * sigma **2) * T) /(sigma * np.sqrt(T))
         return S0 * sci.norm.cdf(d1, 0.0, 1.0) - K * np.exp(-r * T)* sci.norm.cdf(d2, 0.0, 1.0)
-    @tf.function
+    #@tf.function
     def Renormalize_tf(self, X, gbm = False):
         if gbm:
             max_val = tf.cast(self.gbm_max_val, tf.float32)
@@ -185,7 +185,7 @@ class GTGAN(Loader, Option_data, Losses):
         T3 = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(self.regression_features * len(self.strikes), activation = 'linear'))(T3)
         model = tf.keras.Model(inputs = inp, outputs = [T1, T2, T3], name = 'RegressionNet')
         return model
-    @tf.function
+    #@tf.function
     def RegressionLoss(self, H, X, gbm = False):
         L1, L2, L3 = [], [], []
         P01, P02, P03 = [], [], []
@@ -239,7 +239,7 @@ class GTGAN(Loader, Option_data, Losses):
         replication_prices = tf.concat([P01, P02, P03], axis = 0)
         price_error = tf.keras.losses.mse(replication_prices, market_prices)
         return replication_loss, replication_prices, price_error, market_prices
-    @tf.function
+    #@tf.function
     def Embedder_train_step(self, X):
         with tf.GradientTape() as tape:
             H = self.Embedder(X, training = True)
@@ -248,7 +248,7 @@ class GTGAN(Loader, Option_data, Losses):
         grads = tape.gradient(loss, self.Embedder.trainable_variables + self.Recovery.trainable_variables)
         self.Embedder_optimizer.apply_gradients(zip(grads, self.Embedder.trainable_variables + self.Recovery.trainable_variables))
         return loss
-    @tf.function
+    #@tf.function
     def Supervised_Generator_train_step(self, X):
         with tf.GradientTape() as tape:
             H = self.Embedder(X)
@@ -258,50 +258,38 @@ class GTGAN(Loader, Option_data, Losses):
         self.Supervisor_optimizer.apply_gradients(zip(grads, self.Supervisor.trainable_variables))
         # alternatively add generator vars
         return loss
-    # only for testing GPU optimization (errors related to runtime)
-    @tf.function
-    def GenNetTrainStepBody(self, X1, W1):
-        H = self.Embedder(X1)
-        E_hat = self.Generator(W1, training = True)
-        H_hat = self.Supervisor(E_hat, training = True)
-        H_hat_supervise = self.Supervisor(H, training = True)
-        X_hat = self.Recovery(H_hat, training = True)
-        y_fake = self.Discriminator(H_hat, training = True)
-        y_fake_e = self.Discriminator(E_hat, training = True)
-        G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X1)
-        return G_loss_U, G_loss_S, G_loss_V, G_loss
-    @tf.function
-    def GenNetTrainStepBodyEmb(self, X1, W1):
-        H = self.Embedder(X1, training = True)
-        X_tilde = self.Recovery(H, training = True)
-        embedder_loss = self.EmbedderNetLosst0(X1, X_tilde)
-        return embedder_loss
-    @tf.function
-    def Unsupervised_Generator_train_step(self, X1, W1):
-        with tf.GradientTape() as gen_tape, \
-            tf.GradientTape() as emb_tape:
-            G_loss_U, G_loss_S, G_loss_V, G_loss = self.GenNetTrainStepBody(X1, W1)
-            embedder_loss = self.GenNetTrainStepBodyEmb(X1, W1)
-        generator_grads = gen_tape.gradient(G_loss, self.Generator.trainable_variables + self.Supervisor.trainable_variables)
-        self.Generator_optimizer.apply_gradients(zip(generator_grads, self.Generator.trainable_variables + self.Supervisor.trainable_variables))
-        embedder_grads = emb_tape.gradient(embedder_loss, self.Embedder.trainable_variables + self.Recovery.trainable_variables)
-        self.Embedder_optimizer.apply_gradients(zip(embedder_grads, self.Embedder.trainable_variables + self.Recovery.trainable_variables))
+    #@tf.function
+    def Generator_train_step(self, X, W):
+        with tf.GradientTape(persistent = True) as tape:
+            H = self.Embedder(X)
+            E_hat = self.Generator(W, training = True)
+            H_hat = self.Supervisor(E_hat, training = True)
+            H_hat_supervise = self.Supervisor(H, training = True)
+            X_hat = self.Recovery(H_hat, training = True)
+            y_fake = self.Discriminator(H_hat, training = True)
+            y_fake_e = self.Discriminator(E_hat, training = True)
+            G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X)
+            X_tilde = self.Recovery(H, training = True)
+            embedder_loss = self.EmbedderNetLosst0(X, X_tilde)
+        generator_vars = self.Generator.trainable_variables + self.Supervisor.trainable_variables
+        embedder_vars = self.Embedder.trainable_variables + self.Recovery.trainable_variables
+        generator_grads = tape.gradient(G_loss, generator_vars)
+        embedder_grads = tape.gradient(embedder_loss, embedder_vars)
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
-    @tf.function
-    def Discriminator_train_step(self, X2, W2):
+    #@tf.function
+    def Discriminator_train_step(self, X, W):
         with tf.GradientTape() as tape:
-            H2 = self.Embedder(X2)
-            E_hat2 = self.Generator(W2)
-            H_hat2 = self.Supervisor(E_hat2)
-            y_fake2 = self.Discriminator(H_hat2)
-            y_real2 = self.Discriminator(H2)
-            y_fake_e2 = self.Discriminator(E_hat2)
-            _,_,_, discriminator_loss = self.DiscriminatorNetLoss(y_real2, y_fake2, y_fake_e2)
-        if (discriminator_loss > 0.15):
-            discriminator_grads = tape.gradient(discriminator_loss, self.Discriminator.trainable_variables)
-            self.Discriminator_optimizer.apply_gradients(zip(discriminator_grads, self.Discriminator.trainable_variables))
+            H = self.Embedder(X, training = True)
+            E_hat = self.Generator(W, training = True)
+            H_hat = self.Supervisor(E_hat, training = True)
+            y_fake = self.Discriminator(H_hat, training = True)
+            y_real = self.Discriminator(H, training = True)
+            y_fake_e = self.Discriminator(E_hat, training = True)
+            _,_,_, discriminator_loss = self.DiscriminatorNetLoss(y_real, y_fake, y_fake_e)
+        discriminator_grads = tape.gradient(discriminator_loss, self.Discriminator.trainable_variables)
+        self.Discriminator_optimizer.apply_gradients(zip(discriminator_grads, self.Discriminator.trainable_variables))
         return discriminator_loss
-    @tf.function
+    #@tf.function
     def Regression_train_step(self, W, gbm = False):
         with tf.GradientTape() as tape:
             E_hat = self.Generator(W, training = True)
@@ -313,7 +301,7 @@ class GTGAN(Loader, Option_data, Losses):
         regression_grads = tape.gradient(replication_loss, self.Regression.trainable_variables)
         self.Regression_optimizer.apply_gradients(zip(regression_grads, self.Regression.trainable_variables))
         return replication_loss, replication_prices, price_error, market_prices
-    @tf.function
+    #@tf.function
     def Transform_train_step(self, W, gbm = False, replication_regularizer = 10, unsupervised_regularizer = 100):
         with tf.GradientTape() as tape:
             E_hat = self.Generator(W, training = True)
@@ -331,7 +319,7 @@ class GTGAN(Loader, Option_data, Losses):
         transform_grads = tape.gradient(transform_loss, transform_vars)
         self.Regression_optimizer.apply_gradients(zip(transform_grads, transform_vars))
         return replication_loss, replication_prices, price_error, market_prices,transform_loss, unsupervised_gen_loss
-    @tf.function
+    #@tf.function
     def sample_batch(self, data):
         idx = np.random.randint(low = 0, high = data.shape[0], size = self.batch_size)
         idx = tf.cast(idx, tf.int32)
@@ -365,7 +353,7 @@ class GTGAN(Loader, Option_data, Losses):
             for kk in range(2):
                 X1 = self.sample_batch(data)
                 W1 = self.BrownianMotion(X1.shape[0], X1.shape[1], X1.shape[2])
-                G_loss_U, G_loss_S, G_loss_V, generator_loss, embedder_loss = self.Unsupervised_Generator_train_step(X1, W1)
+                G_loss_U, G_loss_S, G_loss_V, generator_loss, embedder_loss = self.Generator_train_step(X1, W1)
             X2 = self.sample_batch(data)
             W2 = self.BrownianMotion(X2.shape[0], X2.shape[1], X2.shape[2])
             discriminator_loss = self.Discriminator_train_step(X2, W2)
@@ -397,7 +385,7 @@ class GTGAN(Loader, Option_data, Losses):
                 print('----------------------------------------------------------------------------')
         if save:
             print('Saving regression model under P dynamics')
-            model_dirs = [save_dir + '/{}_P1'.format(model_name) for model_name in model_names]
+            model_dirs = [save_dir + '/{}_P'.format(model_name) for model_name in model_names]
             self.Regression.save(model_dirs[3])
         print('Initiating Girsanov Transform Training')
         for iteration in range(self.iterations):
@@ -439,7 +427,7 @@ class GTGAN(Loader, Option_data, Losses):
         else:
             model_dir = base_dir + '/GTGAN'
         if P:
-            model_names = [name + '_P1' for name in model_names]
+            model_names = [name + '_P' for name in model_names]
         else:
             model_names = [name + '_Q' for name in model_names]
         models = [tf.keras.models.load_model(model_dir + '/{}'.format(name), compile = False) for name in model_names]
@@ -454,7 +442,7 @@ if __name__ == '__main__':
                 'hidden_dim':24,
                 'latent_dim': 2,
                 'num_layers': 3,
-                'iterations': 1000,
+                'iterations': 50,
                 'batch_size': 128,
                 'learning_rate':0.0001,
                 'regression_features': 1,
