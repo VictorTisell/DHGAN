@@ -209,7 +209,7 @@ class GTGAN(Loader, Option_data, Losses):
             Yhat1 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H1, dX1), axis = 1), axis = 1)
             # Yhat1 = tf.reduce_sum(tf.multiply(H1, X1[:, :-1, :]), axis = 1)
             p01 = H1[:, 0, :] * X1[:, 0, :]
-            P01.append(tf.reduce_mean(p01))
+            P01.append(tf.abs(tf.reduce_mean(p01)))
             Y1 = tf.math.maximum(X1[:,-1:, 0] - K1, 0)
             Y1 = tf.squeeze(Y1)
             loss1 =tf.reduce_mean((Y1-Yhat1))
@@ -219,7 +219,7 @@ class GTGAN(Loader, Option_data, Losses):
             Yhat2 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H2, dX2), axis = 1), axis = 1)
             # Yhat2 = tf.reduce_sum(tf.multiply(H2, X2[:, :-1, :]), axis = 1)
             p02 = H2[:, 0, :] * X2[:, 0, :]
-            P02.append(tf.reduce_mean(p02))
+            P02.append(tf.abs(tf.reduce_mean(p02)))
             Y2 = tf.math.maximum(X2[:,-1:, 0] - K2, 0)
             Y2 = tf.squeeze(Y1)
             loss2 = tf.reduce_mean((Y2-Yhat2))
@@ -228,7 +228,7 @@ class GTGAN(Loader, Option_data, Losses):
             # Yhat3 = tf.reduce_sum(tf.multiply(H3, X3[:, :-1, :]), axis = 1)
             Yhat3 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H3, dX3), axis = 1), axis = 1)
             p03 = H2[:, 0, :] * X2[:, 0, :]
-            P03.append(tf.reduce_mean(p03))
+            P03.append(tf.abs(tf.reduce_mean(p03)))
             Y3 = tf.math.maximum(X3[:,-1:, 0] - K3, 0)
             Y3 = tf.squeeze(Y3)
             loss3 = tf.reduce_mean(Y3-Yhat3)
@@ -286,6 +286,8 @@ class GTGAN(Loader, Option_data, Losses):
         embedder_vars = self.Embedder.trainable_variables + self.Recovery.trainable_variables
         generator_grads = tape.gradient(G_loss, generator_vars)
         embedder_grads = tape.gradient(embedder_loss, embedder_vars)
+        self.Generator_optimizer.apply(generator_grads, generator_vars)
+        self.Embedder_optimizer.apply(embedder_grads, embedder_vars)
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
     @tf.function
     def Discriminator_train_step(self, X, W):
@@ -453,7 +455,7 @@ if __name__ == '__main__':
                 'hidden_dim': 24,
                 'latent_dim': 2,
                 'num_layers': 3,
-                'iterations': 50,
+                'iterations': 2000,
                 'batch_size': 128,
                 'learning_rate':0.0001,
                 'regression_features': 1,
