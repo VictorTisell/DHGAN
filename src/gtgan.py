@@ -1,4 +1,7 @@
 import tensorflow as tf
+import sys
+import os
+sys.path.insert(1, 'src')
 from utils import Loader, Option_data, Losses
 import pandas as pd
 import numpy as np
@@ -69,12 +72,12 @@ class GTGAN(Loader, Option_data, Losses):
     @tf.function
     def Renormalize_tf(self, X, gbm = False):
         if gbm:
-            max_val = tf.cast(self.gbm_max_val + 1e-7, tf.float32)
+            max_val = tf.cast(self.gbm_max_val, tf.float32)
             min_val = tf.cast(self.gbm_min_val, tf.float32)
             X = X * max_val
             X = X + min_val
         else:
-            max_val = tf.cast(self.max_val + 1e-7, tf.float32)
+            max_val = tf.cast(self.max_val, tf.float32)
             min_val = tf.cast(self.min_val, tf.float32)
             X = X * max_val
             X = X + min_val
@@ -84,11 +87,11 @@ class GTGAN(Loader, Option_data, Losses):
     def EmbedderNet(self):
         model = tf.keras.Sequential(name = 'EmbedderNet')
         if self.module == 'lstm':
-            model.add(tf.keras.layers.LSTM(self.dim, input_shape = (self.seq_len, self.dim), activation = 'tanh',return_sequences = True))
+            model.add(tf.keras.layers.LSTM(self.dim, batch_input_shape = (self.batch_size, self.seq_len, self.dim), activation = 'tanh',return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
         elif self.module == 'gru':
-            model.add(tf.keras.layers.GRU(self.dim, input_shape = (self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.GRU(self.dim, batch_input_shape = (self.batch_size, self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
         else:
@@ -98,11 +101,11 @@ class GTGAN(Loader, Option_data, Losses):
     def RecoveryNet(self):
         model = tf.keras.Sequential(name = 'RecoveryNet')
         if self.module == 'lstm':
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
         elif self.module == 'gru':
-            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.GRU(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
         model.add(TimeDistributed(tf.keras.layers.Dense(self.dim, activation = 'sigmoid')))
@@ -110,11 +113,11 @@ class GTGAN(Loader, Option_data, Losses):
     def SupervisorNet(self):
         model = tf.keras.Sequential(name = 'SupervisorNet')
         if self.module == 'lstm':
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
         elif self.module == 'gru':
-            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.GRU(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
         model.add(TimeDistributed(tf.keras.layers.Dense(self.latent_dim, activation = 'sigmoid')))
@@ -122,11 +125,11 @@ class GTGAN(Loader, Option_data, Losses):
     def GeneratorNet(self, time = True):
         model = tf.keras.Sequential(name = 'GeneratorNet')
         if self.module == 'lstm':
-            model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.LSTM(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
         elif self.module == 'gru':
-            model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
+            model.add(tf.keras.layers.GRU(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
         if time:
@@ -138,25 +141,27 @@ class GTGAN(Loader, Option_data, Losses):
         model = tf.keras.Sequential(name = 'DiscriminatorNet')
         if self.module == 'lstm':
             if time:
-                model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
             else:
-                model.add(tf.keras.layers.LSTM(self.hidden_dim, input_shape = (self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
+                model.add(tf.keras.layers.LSTM(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.LSTM(self.hidden_dim, activation = 'tanh', return_sequences = True))
         elif self.module == 'gru':
             if time:
-                model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
+                model.add(tf.keras.layers.GRU(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.latent_dim), activation = 'tanh', return_sequences = True))
             else:
-                model.add(tf.keras.layers.GRU(self.hidden_dim, input_shape = (self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
+                model.add(tf.keras.layers.GRU(self.hidden_dim, batch_input_shape = (self.batch_size, self.seq_len, self.dim), activation = 'tanh', return_sequences = True))
             for layer in range(self.num_layers):
                 model.add(tf.keras.layers.GRU(self.hidden_dim, activation = 'tanh', return_sequences = True))
         if time:
             model.add(TimeDistributed(tf.keras.layers.Dense(self.latent_dim, activation = 'linear')))
         else:
             model.add(TimeDistributed(tf.keras.layers.Dense(self.dim, activation = 'linear')))
+        # model.add(tf.keras.layers.Flatten())
+        # model.add(tf.keras.layers.Dense(1, activation = 'linear'))
         return model
     def RegressionNet(self):
-        inp = tf.keras.layers.Input(shape = (self.seq_len, self.dim))
+        inp = tf.keras.layers.Input(batch_shape = (self.batch_size, self.seq_len, self.dim))
         if self.module == 'lstm':
             X = tf.keras.layers.LSTM(self.regression_hidden_dim, activation = 'elu', return_sequences = False)(inp)
             X = tf.keras.layers.BatchNormalization()(X)
@@ -198,6 +203,8 @@ class GTGAN(Loader, Option_data, Losses):
         X2 = X[:,:self.maturities[1], :self.regression_features]
         X3 = X[:,:self.maturities[2], :self.regression_features]
         for (H1, K1),(H2, K2),(H3, K3) in zip(HKT1, HKT2, HKT3):
+            dX1 = X1[:, 1:, :] - X1[:, :-1, :]
+            # Yhat1 = tf.reduce_sum(tf.reduce_sum(tf.multiply(H1, dX1), axis = 1), axis = 1)
             Yhat1 = tf.reduce_sum(tf.multiply(H1, X1[:, :-1, :]), axis = 1)
             P01.append(tf.reduce_mean(Yhat1))
             Y1 = tf.math.maximum(X1[:,-1:, 0] - K1, 0)
@@ -251,24 +258,32 @@ class GTGAN(Loader, Option_data, Losses):
         self.Supervisor_optimizer.apply_gradients(zip(grads, self.Supervisor.trainable_variables))
         # alternatively add generator vars
         return loss
+    # only for testing GPU optimization (errors related to runtime)
+    @tf.function
+    def GenNetTrainStepBody(self, X1, W1):
+        H = self.Embedder(X1)
+        E_hat = self.Generator(W1, training = True)
+        H_hat = self.Supervisor(E_hat, training = True)
+        H_hat_supervise = self.Supervisor(H, training = True)
+        X_hat = self.Recovery(H_hat, training = True)
+        y_fake = self.Discriminator(H_hat, training = True)
+        y_fake_e = self.Discriminator(E_hat, training = True)
+        G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X1)
+        return G_loss_U, G_loss_S, G_loss_V, G_loss
+    @tf.function
+    def GenNetTrainStepBodyEmb(self, X1, W1):
+        H = self.Embedder(X1, training = True)
+        X_tilde = self.Recovery(H, training = True)
+        embedder_loss = self.EmbedderNetLosst0(X1, X_tilde)
+        return embedder_loss
     @tf.function
     def Unsupervised_Generator_train_step(self, X1, W1):
         with tf.GradientTape() as gen_tape, \
             tf.GradientTape() as emb_tape:
-            H = self.Embedder(X1)
-            E_hat = self.Generator(W1, training = True)
-            H_hat = self.Supervisor(E_hat)
-            H_hat_supervise = self.Supervisor(H)
-            X_hat = self.Recovery(H_hat)
-            y_fake = self.Discriminator(H_hat)
-            y_fake_e = self.Discriminator(E_hat)
-            G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X1)
-            # Embedder training
-            X_tilde = self.Recovery(H, training = True)
-            embedder_loss = self.EmbedderNetLosst0(X1, X_tilde)
+            G_loss_U, G_loss_S, G_loss_V, G_loss = self.GenNetTrainStepBody(X1, W1)
+            embedder_loss = self.GenNetTrainStepBodyEmb(X1, W1)
         generator_grads = gen_tape.gradient(G_loss, self.Generator.trainable_variables + self.Supervisor.trainable_variables)
         self.Generator_optimizer.apply_gradients(zip(generator_grads, self.Generator.trainable_variables + self.Supervisor.trainable_variables))
-
         embedder_grads = emb_tape.gradient(embedder_loss, self.Embedder.trainable_variables + self.Recovery.trainable_variables)
         self.Embedder_optimizer.apply_gradients(zip(embedder_grads, self.Embedder.trainable_variables + self.Recovery.trainable_variables))
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
@@ -299,20 +314,23 @@ class GTGAN(Loader, Option_data, Losses):
         self.Regression_optimizer.apply_gradients(zip(regression_grads, self.Regression.trainable_variables))
         return replication_loss, replication_prices, price_error, market_prices
     @tf.function
-    def Transform_train_step(self, W, gbm = False, regularizer = 10):
+    def Transform_train_step(self, W, gbm = False, replication_regularizer = 10, unsupervised_regularizer = 100):
         with tf.GradientTape() as tape:
             E_hat = self.Generator(W, training = True)
             H_hat = self.Supervisor(E_hat, training = True)
             X_hat = self.Recovery(H_hat, training = True)
+            y_fake = self.Discriminator(H_hat, training = True)
+            y_fake_e = self.Discriminator(E_hat, training = True)
+            unsupervised_gen_loss = self.GeneratorNet_UnsupervisedLoss(y_fake, y_fake_e)
             X_renorm = self.Renormalize_tf(X_hat, gbm)
             eta = self.Regression(X_renorm, training = True)
             replication_loss, replication_prices, price_error, market_prices = self.RegressionLoss(eta, X_renorm, gbm = gbm)
-            transform_loss = replication_loss + price_error * regularizer
+            transform_loss = price_error + replication_regularizer * replication_loss  + unsupervised_regularizer * unsupervised_gen_loss
         transform_vars =  self.Generator.trainable_variables + self.Supervisor.trainable_variables \
                             + self.Recovery.trainable_variables + self.Regression.trainable_variables
         transform_grads = tape.gradient(transform_loss, transform_vars)
         self.Regression_optimizer.apply_gradients(zip(transform_grads, transform_vars))
-        return replication_loss, replication_prices, price_error, market_prices
+        return replication_loss, replication_prices, price_error, market_prices,transform_loss, unsupervised_gen_loss
     @tf.function
     def sample_batch(self, data):
         idx = np.random.randint(low = 0, high = data.shape[0], size = self.batch_size)
@@ -361,7 +379,7 @@ class GTGAN(Loader, Option_data, Losses):
                 print('---------------------------------------------------------------')
         if save:
             print('Saving models under P dynamics')
-            model_dirs = [save_dir + '/{}_P'.format(model_name) for model_name in model_names]
+            model_dirs = [save_dir + '/{}_P1'.format(model_name) for model_name in model_names]
             # print('Saving model to directory: {}'.format(model_name) for model name in model_names)
             self.Generator.save(model_dirs[0])
             self.Supervisor.save(model_dirs[1])
@@ -379,15 +397,17 @@ class GTGAN(Loader, Option_data, Losses):
                 print('----------------------------------------------------------------------------')
         if save:
             print('Saving regression model under P dynamics')
-            model_dirs = [save_dir + '/{}_P'.format(model_name) for model_name in model_names]
+            model_dirs = [save_dir + '/{}_P1'.format(model_name) for model_name in model_names]
             self.Regression.save(model_dirs[3])
         print('Initiating Girsanov Transform Training')
         for iteration in range(self.iterations):
             W = self.BrownianMotion(self.batch_size, self.seq_len, self.W_dim)
-            replication_loss, replication_prices, price_error, market_prices = self.Transform_train_step(W, gbm)
+            replication_loss, replication_prices, price_error, market_prices,transform_loss, unsupervised_gen_loss = self.Transform_train_step(W, gbm)
             if iteration % 1000 == 0:
                 print('----------------------------------------------------------------------------')
-                print('Over/under-pricing at iteration %d: %.4f'% (iteration, float(replication_loss)))
+                print('Transform loss at iteration %d: %.4f'% (iteration, float(transform_loss)))
+                print('Unsupervised loss at iteration %d: %.4f'% (iteration, float(unsupervised_gen_loss)))
+                print('Replication Error at iteration %d: %.4f'% (iteration, float(replication_loss)))
                 print('Pricing error at iteration %d: %.4f'% (iteration, float(price_error)))
                 print('Regression prices: {}'.format(replication_prices))
                 print('Market prices: {}'.format(market_prices))
@@ -401,7 +421,7 @@ class GTGAN(Loader, Option_data, Losses):
             self.Regression.save(model_dirs[3])
     def generate_data(self, W, generator, supervisor, recovery):
         E_hat = generator(W, training = True)
-        H_hat = supervisor(E, training = True)
+        H_hat = supervisor(E_hat, training = True)
         X_hat = recovery(H_hat, training = True)
         return X_hat
     def Simulate_Data(self, W, generator, supervisor, recovery, gbm = False):
@@ -410,7 +430,7 @@ class GTGAN(Loader, Option_data, Losses):
         return X_hat
     def SimulateHedge_Prices(self, W, generator, supervisor, recovery, regression, gbm = False):
         X_hat = self.Simulate_Data(W, generator, supervisor, recovery, gbm)
-        eta = self.Regression(X, training = True)
+        eta = self.Regression(X_hat, training = True)
         return X_hat, eta
     def Restore(self, model_names, gbm = False, P = False):
         base_dir = 'model_saves'
@@ -419,10 +439,10 @@ class GTGAN(Loader, Option_data, Losses):
         else:
             model_dir = base_dir + '/GTGAN'
         if P:
-            model_names = [name + '_P' for name in model_names]
+            model_names = [name + '_P1' for name in model_names]
         else:
             model_names = [name + '_Q' for name in model_names]
-        models = [tf.keras.models.load_model(model_dir + '/{}'.format(name)) for name in model_names]
+        models = [tf.keras.models.load_model(model_dir + '/{}'.format(name), compile = False) for name in model_names]
         return models
 
 if __name__ == '__main__':
@@ -430,13 +450,13 @@ if __name__ == '__main__':
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
     symbol_list = ['^GSPC', '^VIX', '^NDX', '^RUT', '^DJI',
                 '^FVX','^TNX', '^TYX', 'EURUSD=X','JPY=X']
-    settings = {'module':'gru',
+    settings = {'module':'lstm',
                 'hidden_dim':24,
-                'latent_dim': 4,
+                'latent_dim': 2,
                 'num_layers': 3,
-                'iterations': 30000,
+                'iterations': 1000,
                 'batch_size': 128,
-                'learning_rate':0.001,
+                'learning_rate':0.0001,
                 'regression_features': 1,
                 'regression_hidden_dim': 70,
                 'regression_learning_rate': 0.0001}
@@ -453,16 +473,5 @@ if __name__ == '__main__':
                 'maturities':[10, 21, 31]}
     Model = GTGAN(symbol_list,settings, option_data ,option_settings)
     model_names = ['Generator', 'Supervisor', 'Recovery', 'Regression']
-    Model.train(model_names, save = True, gbm = True)
-    # [gen, sup, rec, reg] = Model.Restore(model_names, gbm = True, P = False)
-    # W = Model.BrownianMotion(100, 31, 10)
-    # X, H = Model.SimulateHedge_Prices(W, gen, sup, rec, reg, gbm = True)
-    #
-    # print(X)
-    # print('aisdjklgaljsdgnaksjdngaksjbgla')
-    # print('')
-    # print('')
-    # print(H)
-    # for i in range(10):
-    #     plt.plot(X[i, :, 0])
-    # plt.show()
+    Model.train(model_names, save = False, gbm = True)
+    # [gen, sup, rec, reg] = Model.Restore(model_names, gbm = True, P = True)
