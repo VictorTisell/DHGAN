@@ -286,8 +286,8 @@ class GTGAN(Loader, Option_data, Losses):
         embedder_vars = self.Embedder.trainable_variables + self.Recovery.trainable_variables
         generator_grads = tape.gradient(G_loss, generator_vars)
         embedder_grads = tape.gradient(embedder_loss, embedder_vars)
-        self.Generator_optimizer.apply(generator_grads, generator_vars)
-        self.Embedder_optimizer.apply(embedder_grads, embedder_vars)
+        self.Generator_optimizer.apply_gradients(zip(generator_grads, generator_vars))
+        self.Embedder_optimizer.apply_gradients(zip(embedder_grads, embedder_vars))
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss
     @tf.function
     def Discriminator_train_step(self, X, W):
