@@ -184,13 +184,18 @@ class Losses:
         G_loss = G_loss_U + gamma * G_loss_U_e + 100 * tf.sqrt(G_loss_S) + 100 * G_loss_V
         return G_loss_U, G_loss_U_e, G_loss_S, G_loss_V1, G_loss_V2, G_loss_V, G_loss
     @tf.function
+    def GeneratorNet_UnsupervisedLoss(self, y_fake, y_fake_e, gamma = 1):
+        G_loss_U = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake), y_fake)
+        G_loss_U_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_fake_e), y_fake_e)
+        return G_loss_U + gamma *G_loss_U_e
+    @tf.function
     def GeneratorNet_SupervisedLoss(self, H, H_hat_supervise):
         G_loss_S = tf.compat.v1.losses.mean_squared_error(H[:, 1:, :], H_hat_supervise[:, :-1, :])
         return G_loss_S
     @tf.function
     def DiscriminatorNetLoss(self, y_real,y_fake, y_fake_e, gamma = 1):
         D_loss_real = tf.compat.v1.losses.sigmoid_cross_entropy(tf.ones_like(y_real), y_real)
-        D_loss_fake = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake), y_real)
+        D_loss_fake = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake), y_fake)
         D_loss_fake_e = tf.compat.v1.losses.sigmoid_cross_entropy(tf.zeros_like(y_fake_e), y_fake_e)
         D_loss = D_loss_real + D_loss_fake + gamma * D_loss_fake_e
         return D_loss_real, D_loss_fake, D_loss_fake_e, D_loss
