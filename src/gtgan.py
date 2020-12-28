@@ -272,7 +272,7 @@ class GTGAN(Loader, Option_data, Losses):
         return loss
     @tf.function
     def Generator_train_step(self, X, W):
-        with tf.GradientTape(persistent = True) as tape:
+        with tf.GradientTape() as gen_tape:
             H = self.Embedder(X, training = True)
             E_hat = self.Generator(W, training = True)
             H_hat = self.Supervisor(E_hat, training = True)
@@ -281,12 +281,14 @@ class GTGAN(Loader, Option_data, Losses):
             y_fake = self.Discriminator(H_hat, training = True)
             y_fake_e = self.Discriminator(E_hat, training = True)
             G_loss_U, _, G_loss_S, _, _, G_loss_V,G_loss = self.GeneratorNetLoss(y_fake, y_fake_e, H, H_hat_supervise, X_hat, X)
+         with tf.GradientTape() as emb_tape:
+            H = self.Embedder(X, training = True)
             X_tilde = self.Recovery(H, training = True)
             embedder_loss = self.EmbedderNetLosst0(X, X_tilde)
         generator_vars = self.Generator.trainable_variables + self.Supervisor.trainable_variables
         embedder_vars = self.Embedder.trainable_variables + self.Recovery.trainable_variables
-        generator_grads = tape.gradient(G_loss, generator_vars)
-        embedder_grads = tape.gradient(embedder_loss, embedder_vars)
+        generator_grads = gen_tape.gradient(G_loss, generator_vars)
+        embedder_grads = emb_tape.gradient(embedder_loss, embedder_vars)
         self.Generator_optimizer.apply_gradients(zip(generator_grads, generator_vars))
         self.Embedder_optimizer.apply_gradients(zip(embedder_grads, embedder_vars))
         return G_loss_U, G_loss_S, G_loss_V, G_loss, embedder_loss

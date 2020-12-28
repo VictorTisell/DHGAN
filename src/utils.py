@@ -169,7 +169,7 @@ class Losses:
         return tf.reduce_mean(time_sum)
     #@tf.function
     def EmbedderNetLosst0(self, X, X_tilde):
-        E_loss_t0 = self.mse(X, X_tilde)
+        E_loss_t0 = tf.compat.v1.losses.mean_squared_error(X, X_tilde)
         return E_loss_t0
     #@tf.function
     def EmbedderNetLoss(self, X, X_tilde, G_loss_S):
@@ -196,7 +196,7 @@ class Losses:
         return G_loss_U + gamma *G_loss_U_e
     #@tf.function
     def GeneratorNet_SupervisedLoss(self, H, H_hat_supervise):
-        G_loss_S = self.mse(H[:, 1:, :], H_hat_supervise[:, :-1, :])
+        G_loss_S = tf.compat.v1.losses.mean_squared_error(H[:, 1:, :], H_hat_supervise[:, :-1, :])
         return G_loss_S
     #@tf.function
     def DiscriminatorNetLoss(self, y_real,y_fake, y_fake_e, gamma = 1):
