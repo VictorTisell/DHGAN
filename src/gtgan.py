@@ -64,6 +64,7 @@ class GTGAN(Loader, Option_data, Losses):
         W = np.zeros(shape = (nb_sims, timesteps, W_dim))
         for t in range(1, timesteps):
             W[:,t,:] = W[:,t-1,:] + np.random.randn(nb_sims, W_dim)* np.sqrt(dt)
+        W = tf.cast(W, tf.float32)
         return W
     def BlackScholes(self, K, T, S0 = 3200 ,r = 0.01, sigma = 0.2):
         d1 = (np.log(S0/K) + (r + 0.5 * sigma **2) * T) /(sigma * np.sqrt(T))
@@ -272,7 +273,7 @@ class GTGAN(Loader, Option_data, Losses):
     @tf.function
     def Generator_train_step(self, X, W):
         with tf.GradientTape(persistent = True) as tape:
-            H = self.Embedder(X)
+            H = self.Embedder(X, training = True)
             E_hat = self.Generator(W, training = True)
             H_hat = self.Supervisor(E_hat, training = True)
             H_hat_supervise = self.Supervisor(H, training = True)
@@ -380,7 +381,7 @@ class GTGAN(Loader, Option_data, Losses):
                 print('---------------------------------------------------------------')
         if save:
             print('Saving models under P dynamics')
-            model_dirs = [save_dir + '/{}_P1'.format(model_name) for model_name in model_names]
+            model_dirs = [save_dir + '/{}_P'.format(model_name) for model_name in model_names]
             # print('Saving model to directory: {}'.format(model_name) for model name in model_names)
             self.Generator.save(model_dirs[0])
             self.Supervisor.save(model_dirs[1])
@@ -455,9 +456,9 @@ if __name__ == '__main__':
                 'hidden_dim': 24,
                 'latent_dim': 2,
                 'num_layers': 3,
-                'iterations': 2000,
+                'iterations': 50000,
                 'batch_size': 128,
-                'learning_rate':0.0001,
+                'learning_rate':0.001,
                 'regression_features': 1,
                 'regression_hidden_dim': 70,
                 'regression_learning_rate': 0.0001}

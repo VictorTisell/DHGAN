@@ -163,9 +163,13 @@ class Option_data(QL_Helpers):
 class Losses:
     def __init_(self):
         pass
+    def mse(self, y, yhat):
+        norm_ = tf.keras.losses.MSE(y, yhat)
+        time_sum = tf.reduce_sum(norm_)
+        return tf.reduce_mean(time_sum)
     #@tf.function
     def EmbedderNetLosst0(self, X, X_tilde):
-        E_loss_t0 = tf.compat.v1.losses.mean_squared_error(X, X_tilde)
+        E_loss_t0 = self.mse(X, X_tilde)
         return E_loss_t0
     #@tf.function
     def EmbedderNetLoss(self, X, X_tilde, G_loss_S):
@@ -173,8 +177,6 @@ class Losses:
         E_loss_0 = 10*tf.sqrt(E_loss_t0)
         E_loss = E_loss0 + 0.1 * G_loss_S
         return E_loss_t0, E_loss_0, E_loss
-    def BCE(self):
-        return tf.keras.losses.BinaryCrossentropy(from_logits = True)
     def GeneratorNetLoss(self, y_fake, y_fake_e, H, H_hat_supervise, X_hat, X, gamma = 1):
         bce = tf.keras.losses.BinaryCrossentropy(from_logits = True)
         G_loss_U = bce(tf.ones_like(y_fake), y_fake)
@@ -194,7 +196,7 @@ class Losses:
         return G_loss_U + gamma *G_loss_U_e
     #@tf.function
     def GeneratorNet_SupervisedLoss(self, H, H_hat_supervise):
-        G_loss_S = tf.compat.v1.losses.mean_squared_error(H[:, 1:, :], H_hat_supervise[:, :-1, :])
+        G_loss_S = self.mse(H[:, 1:, :], H_hat_supervise[:, :-1, :])
         return G_loss_S
     #@tf.function
     def DiscriminatorNetLoss(self, y_real,y_fake, y_fake_e, gamma = 1):
